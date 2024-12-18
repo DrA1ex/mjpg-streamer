@@ -426,8 +426,6 @@ static int init_v4l2(struct vdIn *vd)
         }
     }
 
-    fprintf(stderr, "*** Buffers: %i, Frame-Size: %i\n", vd->buffer_count, vd->max_frame_size);
-
     /*
      * request buffers
      */
