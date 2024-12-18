@@ -426,11 +426,13 @@ static int init_v4l2(struct vdIn *vd)
         }
     }
 
+    fprintf(stderr, "*** Buffers: %i, Frame-Size: %i\n", vd->buffer_count, vd->max_frame_size);
+
     /*
      * request buffers
      */
     memset(&vd->rb, 0, sizeof(struct v4l2_requestbuffers));
-    vd->rb.count = NB_BUFFER;
+    vd->rb.count = vd->buffer_count;
     vd->rb.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     vd->rb.memory = V4L2_MEMORY_MMAP;
 
@@ -443,7 +445,7 @@ static int init_v4l2(struct vdIn *vd)
     /*
      * map the buffers
      */
-    for(i = 0; i < NB_BUFFER; i++) {
+    for(i = 0; i < vd->buffer_count; i++) {
         memset(&vd->buf, 0, sizeof(struct v4l2_buffer));
         vd->buf.index = i;
         vd->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -457,8 +459,12 @@ static int init_v4l2(struct vdIn *vd)
         if(debug)
             fprintf(stderr, "length: %u offset: %u\n", vd->buf.length, vd->buf.m.offset);
 
+        unsigned int computed_buffer_size = vd->max_frame_size > 0
+            ? MIN(vd->buf.length, vd->max_frame_size)
+            : vd->buf.length;
+
         vd->mem[i] = mmap(0 /* start anywhere */ ,
-                          vd->buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, vd->fd,
+                          computed_buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, vd->fd,
                           vd->buf.m.offset);
         if(vd->mem[i] == MAP_FAILED) {
             perror("Unable to map buffer");
@@ -471,7 +477,7 @@ static int init_v4l2(struct vdIn *vd)
     /*
      * Queue the buffers.
      */
-    for(i = 0; i < NB_BUFFER; ++i) {
+    for(i = 0; i < vd->buffer_count; ++i) {
         memset(&vd->buf, 0, sizeof(struct v4l2_buffer));
         vd->buf.index = i;
         vd->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -977,7 +983,7 @@ int setResolution(struct vdIn *vd, int width, int height)
 
     DBG("Unmap buffers\n");
     int i;
-    for (i = 0; i < NB_BUFFER; i++) {
+    for (i = 0; i < vd->buffer_count; i++) {
         munmap(vd->mem[i], vd->buf.length);
     }
 

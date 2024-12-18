@@ -76,6 +76,8 @@ static struct timeval timestamp;
 static int softfps = -1;
 static unsigned int timeout = 5;
 static unsigned int dv_timings = 0;
+static unsigned char buffer_count = 4;
+static unsigned int max_frame_size = 0;
 
 static const struct {
   const char * k;
@@ -215,6 +217,10 @@ int input_init(input_parameter *param, int id)
             {"softfps", required_argument, 0, 0},
             {"timeout", required_argument, 0, 0},
             {"dv_timings", no_argument, 0, 0},
+            {"b", required_argument, 0, 0},
+            {"buffers", required_argument, 0, 0},
+            {"fs", required_argument, 0, 0},
+            {"frame_size", required_argument, 0, 0},
             {0, 0, 0, 0}
         };
 
@@ -387,6 +393,16 @@ int input_init(input_parameter *param, int id)
             DBG("case 42\n");
             dv_timings = 1;
             break;
+        case 43:
+        case 44:
+            DBG("case 43-44\n");
+            buffer_count = MAX(atoi(optarg), 1);
+            break;
+        case 45:
+        case 46:
+            DBG("case 45-46\n");
+            max_frame_size = MAX(atoi(optarg), 0);
+            break;
        default:
            DBG("default case\n");
            help();
@@ -403,11 +419,18 @@ int input_init(input_parameter *param, int id)
         IPRINT("not enough memory for videoIn\n");
         exit(EXIT_FAILURE);
     }
-    
+
+    pctx->videoIn->mem = malloc(sizeof(void*) * buffer_count);
+    pctx->videoIn->buffer_count = buffer_count;
+    pctx->videoIn->max_frame_size = max_frame_size;
+
     /* display the parsed values */
     IPRINT("Using V4L2 device.: %s\n", dev);
     IPRINT("Desired Resolution: %i x %i\n", width, height);
     IPRINT("Frames Per Second.: %i\n", fps);
+    IPRINT("Buffer Count......: %i\n", buffer_count);
+    if(max_frame_size > 0) IPRINT("Max Frame Size....: %i\n", max_frame_size);
+
     char *fmtString = NULL;
     switch (format) {
         case V4L2_PIX_FMT_MJPEG:
@@ -453,6 +476,8 @@ int input_init(input_parameter *param, int id)
         closelog();
         exit(EXIT_FAILURE);
     }
+
+    IPRINT("Estimated Frame Size: %i\n", pctx->videoIn->framesizeIn);
 
     if (softfps > 0) {
         IPRINT("Framedrop FPS.....: %d\n", softfps);
@@ -551,6 +576,8 @@ void help(void)
     "                          set your camera to its maximum fps to avoid stuttering\n" \
     " [-timeout] ............: Timeout for device querying (seconds)\n" \
     " [-dv_timings] .........: Enable DV timings queriyng and events processing\n" \
+    " [-b  | --buffers ].....: set capturing bufers count (default 4)\n" \
+    " [-fs | --frame_size ]..: limits frame size mapped from capture driver\n" \
     " ---------------------------------------------------------------\n");
 
     fprintf(stderr, "\n"\

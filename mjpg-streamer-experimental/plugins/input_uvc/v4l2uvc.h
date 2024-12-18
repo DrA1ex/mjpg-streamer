@@ -41,7 +41,7 @@
 #include <linux/videodev2.h>
 
 #include "../../mjpg_streamer.h"
-#define NB_BUFFER 4
+#include "../../utils.h"
 
 
 #define IOCTL_RETRY 4
@@ -82,7 +82,7 @@ struct vdIn {
     struct v4l2_format fmt;
     struct v4l2_buffer buf;
     struct v4l2_requestbuffers rb;
-    void *mem[NB_BUFFER];
+    void **mem;
     unsigned char *tmpbuffer;
     unsigned char *framebuffer;
     streaming_state streamingState;
@@ -115,6 +115,8 @@ struct vdIn {
     unsigned long frame_period_time; // in ms
     unsigned char soft_framedrop;
     unsigned int dv_timings;
+    unsigned char buffer_count;
+    unsigned int max_frame_size;
 };
 
 /* optional initial settings */

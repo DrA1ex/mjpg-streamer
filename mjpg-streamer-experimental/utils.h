@@ -20,6 +20,9 @@
 #                                                                              #
 *******************************************************************************/
 
+#ifndef UTILS_H
+#define UTILS_H
+
 #define ABS(a) (((a) < 0) ? -(a) : (a))
 #ifndef MIN
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -130,3 +133,4 @@ void daemon_mode(void);
 void resolutions_help(const char * padding);
 void parse_resolution_opt(const char * optarg, int * width, int * height);
 
+#endif //UTILS_H
