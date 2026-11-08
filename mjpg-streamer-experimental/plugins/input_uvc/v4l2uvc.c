@@ -457,6 +457,10 @@ static int init_buffers(struct vdIn *vd)
         perror("Unable to allocate buffers");
         return -1;
     }
+    if (vd->rb.count < (unsigned)vd->buffer_count) {
+        fprintf(stderr, "Got %u of %d buffers\n", vd->rb.count, vd->buffer_count);
+        return -1;
+    }
 
     /*
      * map the buffers
