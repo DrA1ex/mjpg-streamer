@@ -159,7 +159,7 @@ int uvcGrab(struct vdIn *vd);
 int close_v4l2(struct vdIn *vd);
 
 int video_enable(struct vdIn *vd);
-int video_suspend(struct vdIn *vd);
+void video_suspend(struct vdIn *vd);
 int video_resume(struct vdIn *vd);
 int video_set_dv_timings(struct vdIn *vd);
 int video_handle_event(struct vdIn *vd);

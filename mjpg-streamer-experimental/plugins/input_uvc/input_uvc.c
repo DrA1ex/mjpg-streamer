@@ -630,31 +630,34 @@ static int demand_expired(input *in)
 }
 
 /******************************************************************************
-Description.: with -idle, stops capture when no output requested a frame for
-              that long and waits until one does
+Description.: stops capture and frees the buffers, then restarts capture,
+              retrying with backoff (buffer allocation fails under memory
+              pressure). With -idle, first waits for a frame request.
 Input Value.: called and returns with in->db locked
-Return Value: 0 if capturing, -1 if capture could not be stopped or restarted
+Return Value: -
 ******************************************************************************/
-static int wait_for_demand(input *in, struct vdIn *vd)
+static void restart_capture(input *in, struct vdIn *vd)
 {
-    int ret = 0;
+    unsigned int delay = 1;
+    struct timespec t;
 
-    if (!demand_expired(in))
-        return 0;
-
-    /* pthread_cond_wait() is a cancellation point, see input_stop() */
+    /* pthread_cond_*wait() are cancellation points, see input_stop() */
     pthread_cleanup_push(unlock_db, &in->db);
-    IPRINT("no frames requested for %u s, stopping capture\n", idle);
-    if (video_suspend(vd) < 0) {
-        ret = -1;
-    } else {
-        while (demand_expired(in))
-            pthread_cond_wait(&in->demand_update, &in->db);
-        IPRINT("frame requested, restarting capture\n");
-        ret = video_resume(vd);
+    video_suspend(vd);
+    while (idle > 0 && demand_expired(in))
+        pthread_cond_wait(&in->demand_update, &in->db);
+    while (1) {
+        IPRINT("restarting capture\n");
+        if (video_resume(vd) == 0)
+            break;
+        video_suspend(vd);
+        IPRINT("restart failed, retrying in %u s\n", delay);
+        clock_gettime(CLOCK_REALTIME, &t);
+        t.tv_sec += delay;
+        while (pthread_cond_timedwait(&in->demand_update, &in->db, &t) == 0);
+        delay = MIN(delay * 2, 8);
     }
     pthread_cleanup_pop(0);
-    return ret;
 }
 
 /******************************************************************************
@@ -669,7 +672,6 @@ void *cam_thread(void *arg)
     context_settings *settings = pcontext->init_settings;
     
     unsigned int every_count = 0;
-    unsigned int restarts = 0;
     int quality = settings->quality;
     
     /* set cleanup handler to cleanup allocated resources */
@@ -808,7 +810,6 @@ void *cam_thread(void *arg)
                 IPRINT("Error grabbing frames\n");
                 goto restart;
             }
-            restarts = 0;
 
             if ( every_count < every - 1 ) {
                 DBG("dropping %d frame for every=%d\n", every_count + 1, every);
@@ -894,9 +895,9 @@ void *cam_thread(void *arg)
             /* signal fresh_frame */
             pthread_cond_broadcast(&pglobal->in[pcontext->id].db_update);
 
-            if (idle > 0 && wait_for_demand(in, pcontext->videoIn) < 0) {
-                pthread_mutex_unlock(&pglobal->in[pcontext->id].db);
-                goto endloop;
+            if (idle > 0 && demand_expired(in)) {
+                IPRINT("no frames requested for %u s, stopping capture\n", idle);
+                restart_capture(in, pcontext->videoIn);
             }
             pthread_mutex_unlock(&pglobal->in[pcontext->id].db);
         }
@@ -919,10 +920,9 @@ other_select_handlers:
 
 restart:
         /* e.g. URBs lost to failed GFP_ATOMIC allocations: restart streaming */
-        if (++restarts > 3 ||
-            video_suspend(pcontext->videoIn) < 0 || video_resume(pcontext->videoIn) < 0)
-            goto endloop;
-        IPRINT("capture restarted (attempt %u)\n", restarts);
+        pthread_mutex_lock(&in->db);
+        restart_capture(in, pcontext->videoIn);
+        pthread_mutex_unlock(&in->db);
     }
 
 endloop:

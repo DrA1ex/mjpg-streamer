@@ -442,6 +442,8 @@ static int init_buffers(struct vdIn *vd)
     int i;
     int ret = 0;
 
+    memset(vd->mem, 0, sizeof(void *) * vd->buffer_count);
+
     /*
      * request buffers
      */
@@ -482,6 +484,7 @@ static int init_buffers(struct vdIn *vd)
                           computed_buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, vd->fd,
                           vd->buf.m.offset);
         if(vd->mem[i] == MAP_FAILED) {
+            vd->mem[i] = NULL;
             perror("Unable to map buffer");
             return -1;
         }
@@ -535,20 +538,22 @@ static int video_disable(struct vdIn *vd, streaming_state disabledState)
     return 0;
 }
 
-/* stop capture and free the driver buffers (vb2 and URB memory) */
-int video_suspend(struct vdIn *vd)
+/* stop capture and free the driver buffers (vb2 and URB memory),
+   also undoes a partially failed video_resume() */
+void video_suspend(struct vdIn *vd)
 {
     int i;
 
-    if (video_disable(vd, STREAMING_OFF) < 0)
-        return -1;
-    for (i = 0; i < vd->buffer_count; i++)
-        munmap(vd->mem[i], vd->mem_length);
+    video_disable(vd, STREAMING_OFF);
+    for (i = 0; i < vd->buffer_count; i++) {
+        if (vd->mem[i])
+            munmap(vd->mem[i], vd->mem_length);
+        vd->mem[i] = NULL;
+    }
     /* not fatal: video_resume() requests the buffers again anyway */
     vd->rb.count = 0;
     if (xioctl(vd->fd, VIDIOC_REQBUFS, &vd->rb) < 0)
         perror("Unable to free buffers");
-    return 0;
 }
 
 /* reallocate the buffers and restart capture after video_suspend() */
@@ -1019,7 +1024,8 @@ int setResolution(struct vdIn *vd, int width, int height)
     DBG("Unmap buffers\n");
     int i;
     for (i = 0; i < vd->buffer_count; i++) {
-        munmap(vd->mem[i], vd->buf.length);
+        if (vd->mem[i])
+            munmap(vd->mem[i], vd->buf.length);
     }
 
     if (CLOSE_VIDEO(vd->fd) == 0) {
