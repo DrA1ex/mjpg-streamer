@@ -78,6 +78,7 @@ static unsigned int timeout = 5;
 static unsigned int dv_timings = 0;
 static unsigned char buffer_count = 4;
 static unsigned int max_frame_size = 0;
+static unsigned int idle = 0;
 
 static const struct {
   const char * k;
@@ -221,6 +222,7 @@ int input_init(input_parameter *param, int id)
             {"buffers", required_argument, 0, 0},
             {"fs", required_argument, 0, 0},
             {"frame_size", required_argument, 0, 0},
+            {"idle", required_argument, 0, 0},
             {0, 0, 0, 0}
         };
 
@@ -403,6 +405,10 @@ int input_init(input_parameter *param, int id)
             DBG("case 45-46\n");
             max_frame_size = MAX(atoi(optarg), 0);
             break;
+        case 47:
+            DBG("case 47\n");
+            idle = MAX(atoi(optarg), 0);
+            break;
        default:
            DBG("default case\n");
            help();
@@ -430,6 +436,7 @@ int input_init(input_parameter *param, int id)
     IPRINT("Frames Per Second.: %i\n", fps);
     IPRINT("Buffer Count......: %i\n", buffer_count);
     if(max_frame_size > 0) IPRINT("Max Frame Size....: %i\n", max_frame_size);
+    if(idle > 0) IPRINT("Idle Timeout......: %u s\n", idle);
 
     char *fmtString = NULL;
     switch (format) {
@@ -527,6 +534,9 @@ int input_run(int id)
         exit(EXIT_FAILURE);
     }
 
+    /* outputs are not running yet, so no lock is needed */
+    clock_gettime(CLOCK_MONOTONIC, &in->demand);
+
     DBG("launching camera thread #%02d\n", id);
     /* create thread and pass context to thread function */
     pthread_create(&(pctx->threadID), NULL, cam_thread, in);
@@ -578,6 +588,9 @@ void help(void)
     " [-dv_timings] .........: Enable DV timings queriyng and events processing\n" \
     " [-b  | --buffers ].....: set capturing bufers count (default 4)\n" \
     " [-fs | --frame_size ]..: limits frame size mapped from capture driver\n" \
+    " [-idle ]...............: stop capturing when no frame was requested for this\n" \
+    "                          many seconds, restart on request (default 0: never)\n" \
+    "                          only output_http requests frames\n" \
     " ---------------------------------------------------------------\n");
 
     fprintf(stderr, "\n"\
@@ -598,6 +611,50 @@ void help(void)
     " [-cagc ]...............: Set chroma gain control (auto or integer)\n"\
     " ---------------------------------------------------------------\n\n"\
     );
+}
+
+static void unlock_db(void *db)
+{
+    pthread_mutex_unlock((pthread_mutex_t *)db);
+}
+
+/* true if no output requested a frame for idle seconds, call with in->db locked */
+static int demand_expired(input *in)
+{
+    struct timespec now;
+    time_t s;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    s = now.tv_sec - in->demand.tv_sec;
+    return s > (time_t)idle || (s == (time_t)idle && now.tv_nsec >= in->demand.tv_nsec);
+}
+
+/******************************************************************************
+Description.: with -idle, stops capture when no output requested a frame for
+              that long and waits until one does
+Input Value.: called and returns with in->db locked
+Return Value: 0 if capturing, -1 if capture could not be stopped or restarted
+******************************************************************************/
+static int wait_for_demand(input *in, struct vdIn *vd)
+{
+    int ret = 0;
+
+    if (!demand_expired(in))
+        return 0;
+
+    /* pthread_cond_wait() is a cancellation point, see input_stop() */
+    pthread_cleanup_push(unlock_db, &in->db);
+    IPRINT("no frames requested for %u s, stopping capture\n", idle);
+    if (video_suspend(vd) < 0) {
+        ret = -1;
+    } else {
+        while (demand_expired(in))
+            pthread_cond_wait(&in->demand_update, &in->db);
+        IPRINT("frame requested, restarting capture\n");
+        ret = video_resume(vd);
+    }
+    pthread_cleanup_pop(0);
+    return ret;
 }
 
 /******************************************************************************
@@ -834,6 +891,11 @@ void *cam_thread(void *arg)
 
             /* signal fresh_frame */
             pthread_cond_broadcast(&pglobal->in[pcontext->id].db_update);
+
+            if (idle > 0 && wait_for_demand(in, pcontext->videoIn) < 0) {
+                pthread_mutex_unlock(&pglobal->in[pcontext->id].db);
+                goto endloop;
+            }
             pthread_mutex_unlock(&pglobal->in[pcontext->id].db);
         }
 
