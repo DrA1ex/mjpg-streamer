@@ -630,6 +630,9 @@ static int demand_expired(input *in)
    limit work across calls, so a restart that succeeds but yields no frame
    is not retried in a tight loop */
 static unsigned int failures = 0;
+/* frames to drop after a restart: the camera's first frame after STREAMON
+   is often badly underexposed (auto exposure not settled yet) */
+static unsigned int skip_frames = 0;
 
 /******************************************************************************
 Description.: stops capture and frees the buffers, then restarts capture,
@@ -667,8 +670,10 @@ static int restart_capture(input *in, struct vdIn *vd)
         }
         IPRINT("restarting capture\n");
         failures++;
-        if (video_resume(vd) == 0)
+        if (video_resume(vd) == 0) {
+            skip_frames = 1;
             break;
+        }
         if (errno == ENODEV || errno == ENXIO) {
             ret = -1;
             break;
@@ -828,6 +833,11 @@ void *cam_thread(void *arg)
             if(uvcGrab(pcontext->videoIn) < 0) {
                 IPRINT("Error grabbing frames\n");
                 goto restart;
+            }
+
+            if (skip_frames > 0) {
+                skip_frames--;
+                goto other_select_handlers;
             }
 
             if ( every_count < every - 1 ) {
