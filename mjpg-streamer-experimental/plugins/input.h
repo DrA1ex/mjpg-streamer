@@ -86,4 +86,9 @@ struct _input {
     int (*stop)(int);
     int (*run)(int);
     int (*cmd)(int plugin, unsigned int control_id, unsigned int group, int value, char *value_str);
+
+    /* on-demand capture: outputs store the time (CLOCK_MONOTONIC) a frame was
+       last requested and signal demand_update, both under the db mutex */
+    struct timespec demand;
+    pthread_cond_t demand_update;
 };

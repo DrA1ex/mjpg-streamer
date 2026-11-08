@@ -296,6 +296,11 @@ int main(int argc, char *argv[])
             closelog();
             exit(EXIT_FAILURE);
         }
+        if(pthread_cond_init(&global.in[i].demand_update, NULL) != 0) {
+            LOG("could not initialize condition variable\n");
+            closelog();
+            exit(EXIT_FAILURE);
+        }
 
         tmp = (size_t)(strchr(input[i], ' ') - input[i]);
         global.in[i].stop      = 0;
