@@ -855,6 +855,13 @@ other_select_handlers:
 
 endloop:
 
+    if (!pglobal->stop) {
+        /* without frames every client would wait forever: exit and let a
+           supervisor restart us */
+        IPRINT("capture failed, exiting\n");
+        exit(EXIT_FAILURE);
+    }
+
     DBG("leaving input thread, calling cleanup function now\n");
     pthread_cleanup_pop(1);
 
