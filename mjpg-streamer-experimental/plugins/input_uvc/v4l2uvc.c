@@ -1025,7 +1025,8 @@ int setResolution(struct vdIn *vd, int width, int height)
     int i;
     for (i = 0; i < vd->buffer_count; i++) {
         if (vd->mem[i])
-            munmap(vd->mem[i], vd->buf.length);
+            munmap(vd->mem[i], vd->mem_length);
+        vd->mem[i] = NULL;
     }
 
     if (CLOSE_VIDEO(vd->fd) == 0) {

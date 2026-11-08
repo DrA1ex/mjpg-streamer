@@ -590,7 +590,6 @@ void help(void)
     " [-fs | --frame_size ]..: limits frame size mapped from capture driver\n" \
     " [-idle ]...............: stop capturing when no frame was requested for this\n" \
     "                          many seconds, restart on request (default 0: never)\n" \
-    "                          only output_http requests frames\n" \
     " ---------------------------------------------------------------\n");
 
     fprintf(stderr, "\n"\
@@ -622,11 +621,9 @@ static void unlock_db(void *db)
 static int demand_expired(input *in)
 {
     struct timespec now;
-    time_t s;
 
     clock_gettime(CLOCK_MONOTONIC, &now);
-    s = now.tv_sec - in->demand.tv_sec;
-    return s > (time_t)idle || (s == (time_t)idle && now.tv_nsec >= in->demand.tv_nsec);
+    return now.tv_sec - in->demand.tv_sec > (time_t)idle;
 }
 
 /******************************************************************************
@@ -654,6 +651,8 @@ static void restart_capture(input *in, struct vdIn *vd)
         IPRINT("restart failed, retrying in %u s\n", delay);
         clock_gettime(CLOCK_REALTIME, &t);
         t.tv_sec += delay;
+        /* a sleep that releases db: unlock+sleep+lock would break the
+           unlock_db cancellation cleanup */
         while (pthread_cond_timedwait(&in->demand_update, &in->db, &t) == 0);
         delay = MIN(delay * 2, 8);
     }
