@@ -669,6 +669,7 @@ void *cam_thread(void *arg)
     context_settings *settings = pcontext->init_settings;
     
     unsigned int every_count = 0;
+    unsigned int restarts = 0;
     int quality = settings->quality;
     
     /* set cleanup handler to cleanup allocated resources */
@@ -796,7 +797,7 @@ void *cam_thread(void *arg)
                 }
                 continue;
             } else {
-                goto endloop;
+                goto restart;
             }
         }
 
@@ -805,8 +806,9 @@ void *cam_thread(void *arg)
             /* grab a frame */
             if(uvcGrab(pcontext->videoIn) < 0) {
                 IPRINT("Error grabbing frames\n");
-                goto endloop;
+                goto restart;
             }
+            restarts = 0;
 
             if ( every_count < every - 1 ) {
                 DBG("dropping %d frame for every=%d\n", every_count + 1, every);
@@ -913,6 +915,14 @@ other_select_handlers:
                 }
             }
         }
+        continue;
+
+restart:
+        /* e.g. URBs lost to failed GFP_ATOMIC allocations: restart streaming */
+        if (++restarts > 3 ||
+            video_suspend(pcontext->videoIn) < 0 || video_resume(pcontext->videoIn) < 0)
+            goto endloop;
+        IPRINT("capture restarted (attempt %u)\n", restarts);
     }
 
 endloop:
