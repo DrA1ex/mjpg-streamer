@@ -112,8 +112,6 @@ static void signal_handler(int sig)
 
     for(i = 0; i < global.outcnt; i++) {
         global.out[i].stop(global.out[i].param.id);
-        pthread_cond_destroy(&global.in[i].db_update);
-        pthread_mutex_destroy(&global.in[i].db);
         /*for (j = 0; j<MAX_PLUGIN_ARGUMENTS; j++) {
             if (global.out[i].param.argv[j] != NULL)
                 free(global.out[i].param.argv[j]);
@@ -293,7 +291,8 @@ int main(int argc, char *argv[])
             closelog();
             exit(EXIT_FAILURE);
         }
-        if(pthread_cond_init(&global.in[i].db_update, NULL) != 0) {
+        if(pthread_cond_init(&global.in[i].db_update, NULL) != 0 ||
+           pthread_cond_init(&global.in[i].demand_update, NULL) != 0) {
             LOG("could not initialize condition variable\n");
             closelog();
             exit(EXIT_FAILURE);

@@ -408,7 +408,7 @@ void send_snapshot(cfd *context_fd, int input_number)
 
     /* wait for a fresh frame */
     pthread_mutex_lock(&pglobal->in[input_number].db);
-    pthread_cond_wait(&pglobal->in[input_number].db_update, &pglobal->in[input_number].db);
+    input_wait_frame(&pglobal->in[input_number]);
 
     /* read buffer */
     frame_size = pglobal->in[input_number].size;
@@ -481,7 +481,7 @@ void send_stream(cfd *context_fd, int input_number)
 
         /* wait for fresh frames */
         pthread_mutex_lock(&pglobal->in[input_number].db);
-        pthread_cond_wait(&pglobal->in[input_number].db_update, &pglobal->in[input_number].db);
+        input_wait_frame(&pglobal->in[input_number]);
 
         /* read buffer */
         frame_size = pglobal->in[input_number].size;
@@ -584,7 +584,7 @@ void send_stream_wxp(cfd *context_fd, int input_number)
 
         /* wait for fresh frames */
         pthread_mutex_lock(&pglobal->in[input_number].db);
-        pthread_cond_wait(&pglobal->in[input_number].db_update, &pglobal->in[input_number].db);
+        input_wait_frame(&pglobal->in[input_number]);
 
         /* read buffer */
         frame_size = pglobal->in[input_number].size;

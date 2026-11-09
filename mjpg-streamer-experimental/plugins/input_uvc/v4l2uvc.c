@@ -87,6 +87,7 @@ int xioctl(int fd, int IOCTL_X, void *arg)
 }
 
 static int init_v4l2(struct vdIn *vd);
+static int init_buffers(struct vdIn *vd);
 static int init_framebuffer(struct vdIn *vd);
 static void free_framebuffer(struct vdIn *vd);
 
@@ -426,6 +427,23 @@ static int init_v4l2(struct vdIn *vd)
         }
     }
 
+    if (init_buffers(vd) < 0)
+        goto fatal;
+    return 0;
+fatal:
+    fprintf(stderr, "Init v4L2 failed !! exit fatal\n");
+    return -1;
+
+}
+
+/* request, map and queue the capture buffers */
+static int init_buffers(struct vdIn *vd)
+{
+    int i;
+    int ret = 0;
+
+    memset(vd->mem, 0, sizeof(void *) * vd->buffer_count);
+
     /*
      * request buffers
      */
@@ -437,7 +455,11 @@ static int init_v4l2(struct vdIn *vd)
     ret = xioctl(vd->fd, VIDIOC_REQBUFS, &vd->rb);
     if(ret < 0) {
         perror("Unable to allocate buffers");
-        goto fatal;
+        return -1;
+    }
+    if (vd->rb.count < (unsigned)vd->buffer_count) {
+        fprintf(stderr, "Got %u of %d buffers\n", vd->rb.count, vd->buffer_count);
+        return -1;
     }
 
     /*
@@ -451,7 +473,7 @@ static int init_v4l2(struct vdIn *vd)
         ret = xioctl(vd->fd, VIDIOC_QUERYBUF, &vd->buf);
         if(ret < 0) {
             perror("Unable to query buffer");
-            goto fatal;
+            return -1;
         }
 
         if(debug)
@@ -460,13 +482,15 @@ static int init_v4l2(struct vdIn *vd)
         unsigned int computed_buffer_size = vd->max_frame_size > 0
             ? MIN(vd->buf.length, vd->max_frame_size)
             : vd->buf.length;
+        vd->mem_length = computed_buffer_size;
 
         vd->mem[i] = mmap(0 /* start anywhere */ ,
                           computed_buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, vd->fd,
                           vd->buf.m.offset);
         if(vd->mem[i] == MAP_FAILED) {
+            vd->mem[i] = NULL;
             perror("Unable to map buffer");
-            goto fatal;
+            return -1;
         }
         if(debug)
             fprintf(stderr, "Buffer mapped at address %p.\n", vd->mem[i]);
@@ -483,14 +507,10 @@ static int init_v4l2(struct vdIn *vd)
         ret = xioctl(vd->fd, VIDIOC_QBUF, &vd->buf);
         if(ret < 0) {
             perror("Unable to queue buffer");
-            goto fatal;;
+            return -1;
         }
     }
     return 0;
-fatal:
-    fprintf(stderr, "Init v4L2 failed !! exit fatal\n");
-    return -1;
-
 }
 
 int video_enable(struct vdIn *vd)
@@ -520,6 +540,32 @@ static int video_disable(struct vdIn *vd, streaming_state disabledState)
     DBG("STopping capture done\n");
     vd->streamingState = disabledState;
     return 0;
+}
+
+/* stop capture and free the driver buffers (vb2 and URB memory),
+   also undoes a partially failed video_resume() */
+void video_suspend(struct vdIn *vd)
+{
+    int i;
+
+    video_disable(vd, STREAMING_OFF);
+    for (i = 0; i < vd->buffer_count; i++) {
+        if (vd->mem[i])
+            munmap(vd->mem[i], vd->mem_length);
+        vd->mem[i] = NULL;
+    }
+    /* not fatal: video_resume() requests the buffers again anyway */
+    vd->rb.count = 0;
+    if (xioctl(vd->fd, VIDIOC_REQBUFS, &vd->rb) < 0)
+        perror("Unable to free buffers");
+}
+
+/* reallocate the buffers and restart capture after video_suspend() */
+int video_resume(struct vdIn *vd)
+{
+    if (init_buffers(vd) < 0)
+        return -1;
+    return video_enable(vd);
 }
 
 int video_set_dv_timings(struct vdIn *vd)
@@ -982,7 +1028,9 @@ int setResolution(struct vdIn *vd, int width, int height)
     DBG("Unmap buffers\n");
     int i;
     for (i = 0; i < vd->buffer_count; i++) {
-        munmap(vd->mem[i], vd->buf.length);
+        if (vd->mem[i])
+            munmap(vd->mem[i], vd->mem_length);
+        vd->mem[i] = NULL;
     }
 
     if (CLOSE_VIDEO(vd->fd) == 0) {

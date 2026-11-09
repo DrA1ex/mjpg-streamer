@@ -86,4 +86,19 @@ struct _input {
     int (*stop)(int);
     int (*run)(int);
     int (*cmd)(int plugin, unsigned int control_id, unsigned int group, int value, char *value_str);
+
+    /* on-demand capture: outputs store the time (CLOCK_MONOTONIC) a frame was
+       last requested and signal demand_update, both under the db mutex */
+    struct timespec demand;
+    pthread_cond_t demand_update;
 };
+
+/* wait for the next frame and tell the input that one is wanted (on-demand
+   capture), call with in->db locked */
+static inline void input_wait_frame(input *in)
+{
+    clock_gettime(CLOCK_MONOTONIC, &in->demand);
+    pthread_cond_signal(&in->demand_update);
+    pthread_cond_wait(&in->db_update, &in->db);
+}
+
